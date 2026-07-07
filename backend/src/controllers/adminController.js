@@ -59,4 +59,45 @@ async function labelAccuracy(req, res) {
   res.json(resumen);
 }
 
-module.exports = { seatBots, unseatBots, listActiveBots, labelAccuracy };
+// GET /admin/dashboard → panorama en vivo del sistema
+async function dashboard(req, res) {
+  const [[players]] = await pool.query(
+    'SELECT COUNT(*) total, SUM(is_bot=0) humanos, SUM(is_bot=1) bots FROM players'
+  );
+  const [[chips]] = await pool.query(
+    'SELECT SUM(play_chips) circulacion FROM players WHERE is_bot = 0'
+  );
+  const [[handsToday]] = await pool.query(
+    'SELECT COUNT(*) n FROM hand_history WHERE ended_at >= CURDATE()'
+  );
+  const [[handsTotal]] = await pool.query('SELECT COUNT(*) n FROM hand_history');
+  const [tourneys] = await pool.query(
+    `SELECT name, status, prize_pool,
+       (SELECT COUNT(*) FROM tournament_registrations r WHERE r.tournament_id = t.id) regs
+     FROM tournaments t WHERE status IN ('registering','running') ORDER BY created_at DESC LIMIT 10`
+  );
+  const [lastTx] = await pool.query(
+    `SELECT ct.delta, ct.reason, ct.created_at, p.nickname
+     FROM chip_transactions ct JOIN players p ON p.id = ct.player_id
+     ORDER BY ct.id DESC LIMIT 12`
+  );
+  // Mesas vivas en memoria (con gente sentada)
+  const liveTables = tm.getAllTables()
+    .map(t => ({
+      id: t.id, name: t.name, isTournament: !!t.isTournament, handNumber: t.handNumber || 0,
+      seated: t.seats.filter(s => s.playerId).length, maxSeats: t.seats.length,
+    }))
+    .filter(t => t.seated > 0);
+  res.json({
+    players: { total: players.total, humanos: players.humanos, bots: players.bots },
+    chipsCirculacion: Number(chips.circulacion) || 0,
+    manosHoy: handsToday.n,
+    manosTotal: handsTotal.n,
+    botsActivos: botManager.listActive().length,
+    mesasVivas: liveTables,
+    torneos: tourneys,
+    ultimasTransacciones: lastTx,
+  });
+}
+
+module.exports = { seatBots, unseatBots, listActiveBots, labelAccuracy, dashboard };

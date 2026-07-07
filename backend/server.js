@@ -12,7 +12,16 @@ const app = express();
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-app.use('/api/auth', require('./src/routes/auth'));
+// Rate-limit en auth: frena fuerza bruta de contraseñas sin molestar el juego.
+const rateLimit = require('express-rate-limit');
+const authLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutos
+  limit: 30,               // 30 intentos por IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos, espera unos minutos' },
+});
+app.use('/api/auth', authLimiter, require('./src/routes/auth'));
 app.use('/api/tables', require('./src/routes/tables'));
 app.use('/api/players', require('./src/routes/players'));
 app.use('/api/hands', require('./src/routes/hands'));
@@ -58,6 +67,8 @@ setupDb()
     server.listen(PORT, () => console.log(`[Server] Listening on port ${PORT}`));
     // Reprogramar torneos con inicio por fecha/hora tras un reinicio
     try { require('./src/controllers/tournamentsController').initScheduler(); } catch (e) { console.error('[Torneos] scheduler:', e.message); }
+    // Restaurar torneos que estaban en curso (persistencia ante reinicios)
+    try { require('./src/engine/tournamentManager').resumeTournaments(); } catch (e) { console.error('[Torneos] resume:', e.message); }
   })
   .catch(err => {
     console.error('[DB] Setup failed:', err);

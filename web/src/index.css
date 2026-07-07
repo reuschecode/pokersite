@@ -172,6 +172,9 @@ body {
   margin: 0;
   background: #0a1f0a;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-  overflow: hidden;
+  /* Solo bloquear el scroll horizontal: las páginas largas (perfil, stats)
+     deben poder desplazarse en vertical. La mesa no scrollea porque su
+     propio contenedor mide 100dvh con overflow-hidden. */
+  overflow-x: hidden;
 }
 #root { min-height: 100vh; }

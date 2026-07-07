@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ChipStack } from './ChipStack';
 
-export function ActionPanel({ isMobile = false, compact = false, actionRequired, myPlayerId, mySeat, currentBet, lastRaiseSize, pot = 0, bigBlind = 10, onAction, onRevealCards, canReveal }) {
+export function ActionPanel({ isMobile = false, compact = false, autoFold = false, onToggleAutoFold, actionRequired, myPlayerId, mySeat, currentBet, lastRaiseSize, pot = 0, bigBlind = 10, onAction, onRevealCards, canReveal }) {
   const isMyTurn = actionRequired && actionRequired.playerId === myPlayerId;
   const stack = mySeat?.stack || 0;
   const streetBet = mySeat?.currentStreetBet || 0;
@@ -23,8 +23,12 @@ export function ActionPanel({ isMobile = false, compact = false, actionRequired,
 
   if (!isMyTurn) {
     return (
-      <div className="flex items-center justify-between py-3 px-4">
+      <div className="flex items-center justify-between py-3 px-4 gap-3">
         <span className="text-gray-600 text-sm">Esperando turno...</span>
+        <label className={`flex items-center gap-1.5 cursor-pointer text-xs font-semibold ${autoFold ? 'text-yellow-300' : 'text-gray-500'}`}>
+          <input type="checkbox" className="w-3.5 h-3.5 accent-yellow-500" checked={autoFold} onChange={onToggleAutoFold} />
+          AUSENTE (auto-fold)
+        </label>
         {canReveal && (
           <button
             onClick={onRevealCards}
@@ -96,12 +100,9 @@ export function ActionPanel({ isMobile = false, compact = false, actionRequired,
   return (
     <div className="flex items-center gap-3 px-4 py-3">
       {/* Opciones */}
-      <div className="flex flex-col gap-1 text-[10px] text-gray-500">
-        <label className="flex items-center gap-1 cursor-pointer hover:text-gray-300">
-          <input type="checkbox" className="w-3 h-3" /> AUTO-FOLD
-        </label>
-        <label className="flex items-center gap-1 cursor-pointer hover:text-gray-300">
-          <input type="checkbox" className="w-3 h-3" /> SENTARSE FUERA
+      <div className="flex flex-col gap-1 text-[10px]">
+        <label className={`flex items-center gap-1 cursor-pointer ${autoFold ? 'text-yellow-300' : 'text-gray-500 hover:text-gray-300'}`}>
+          <input type="checkbox" className="w-3 h-3 accent-yellow-500" checked={autoFold} onChange={onToggleAutoFold} /> AUSENTE (AUTO-FOLD)
         </label>
       </div>
 

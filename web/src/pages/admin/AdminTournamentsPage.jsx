@@ -17,16 +17,47 @@ const torneoSchema = z.object({
   maxPlayers: z.coerce.number().int('Debe ser un número entero')
     .min(2, 'Mínimo 2 jugadores').max(30, 'Máximo 30 jugadores'),
   buyIn: z.coerce.number().min(0, 'El buy-in no puede ser negativo').max(100000, 'Buy-in demasiado alto'),
-  turbo: z.boolean(),
+  bounty: z.coerce.number().min(0).max(100000).optional(),
+  addedPrize: z.coerce.number().min(0).max(1000000).optional(),
+  speed: z.enum(['normal', 'turbo', 'hyper', 'deep']),
 });
-// Ciegas turbo (para pruebas rápidas): suben cada 30s
-const TURBO = [
-  { smallBlind: 20, bigBlind: 40, minutes: 0.5 },
-  { smallBlind: 50, bigBlind: 100, minutes: 0.5 },
-  { smallBlind: 150, bigBlind: 300, minutes: 0.5 },
-  { smallBlind: 400, bigBlind: 800, minutes: 0.5 },
-  { smallBlind: 1000, bigBlind: 2000, minutes: 99 },
-];
+
+// Presets de velocidad (niveles de ciegas). "normal" usa el schedule del servidor.
+const SPEEDS = {
+  normal: { label: 'Normal (3 min)', schedule: null },
+  turbo: {
+    label: 'Turbo (30s)',
+    schedule: [
+      { smallBlind: 20, bigBlind: 40, minutes: 0.5 },
+      { smallBlind: 50, bigBlind: 100, minutes: 0.5 },
+      { smallBlind: 150, bigBlind: 300, minutes: 0.5, ante: 30 },
+      { smallBlind: 400, bigBlind: 800, minutes: 0.5, ante: 80 },
+      { smallBlind: 1000, bigBlind: 2000, minutes: 99, ante: 200 },
+    ],
+  },
+  hyper: {
+    label: 'Hyper (15s)',
+    schedule: [
+      { smallBlind: 25, bigBlind: 50, minutes: 0.25 },
+      { smallBlind: 75, bigBlind: 150, minutes: 0.25, ante: 15 },
+      { smallBlind: 200, bigBlind: 400, minutes: 0.25, ante: 40 },
+      { smallBlind: 500, bigBlind: 1000, minutes: 0.25, ante: 100 },
+      { smallBlind: 1200, bigBlind: 2400, minutes: 99, ante: 250 },
+    ],
+  },
+  deep: {
+    label: 'Deep (6 min)',
+    schedule: [
+      { smallBlind: 5, bigBlind: 10, minutes: 6 },
+      { smallBlind: 10, bigBlind: 20, minutes: 6 },
+      { smallBlind: 20, bigBlind: 40, minutes: 6 },
+      { smallBlind: 40, bigBlind: 80, minutes: 6, ante: 10 },
+      { smallBlind: 80, bigBlind: 160, minutes: 6, ante: 20 },
+      { smallBlind: 150, bigBlind: 300, minutes: 6, ante: 40 },
+      { smallBlind: 300, bigBlind: 600, minutes: 99, ante: 75 },
+    ],
+  },
+};
 
 export function AdminTournamentsPage() {
   const [list, setList] = useState([]);
@@ -36,9 +67,9 @@ export function AdminTournamentsPage() {
 
   const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm({
     resolver: zodResolver(torneoSchema),
-    defaultValues: { name: 'Torneo de prueba', maxPlayers: 18, buyIn: 100, turbo: true },
+    defaultValues: { name: 'Torneo de prueba', maxPlayers: 18, buyIn: 100, bounty: 0, addedPrize: 0, speed: 'turbo' },
   });
-  const turbo = watch('turbo');
+  const speed = watch('speed');
 
   async function load() {
     try { const { data } = await api.get('/tournaments'); setList(data); } catch {}
@@ -49,7 +80,8 @@ export function AdminTournamentsPage() {
     try {
       await api.post('/tournaments', {
         name: values.name, maxPlayers: values.maxPlayers, buyIn: values.buyIn,
-        blindSchedule: values.turbo ? TURBO : null,
+        bounty: values.bounty || 0, addedPrize: values.addedPrize || 0,
+        blindSchedule: SPEEDS[values.speed]?.schedule || null,
         startsAt: startAt || null,
       });
       toast.success(startAt ? 'Torneo programado' : 'Torneo creado');
@@ -96,10 +128,28 @@ export function AdminTournamentsPage() {
               {errors.buyIn && <p className="text-red-400 text-xs mt-1">{errors.buyIn.message}</p>}
             </div>
           </div>
-          <label className="flex items-center gap-2 text-sm text-gray-300">
-            <input type="checkbox" checked={turbo} onChange={e => setValue('turbo', e.target.checked)} />
-            Modo turbo (ciegas suben cada 30s — ideal para pruebas)
-          </label>
+          <div className="flex gap-3 flex-wrap">
+            <div className="w-40">
+              <Label className="text-[10px] text-gray-500">Velocidad de ciegas</Label>
+              <select
+                value={speed}
+                onChange={e => setValue('speed', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-md px-2 py-2 text-sm"
+              >
+                {Object.entries(SPEEDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            <div className="w-32">
+              <Label htmlFor="t-bounty" className="text-[10px] text-gray-500">Bounty por cabeza</Label>
+              <Input id="t-bounty" type="number" {...register('bounty')} />
+              <p className="text-[10px] text-gray-500 mt-1">Parte del buy-in que cobra quien elimina</p>
+            </div>
+            <div className="w-32">
+              <Label htmlFor="t-added" className="text-[10px] text-gray-500">Premio añadido</Label>
+              <Input id="t-added" type="number" {...register('addedPrize')} />
+              <p className="text-[10px] text-gray-500 mt-1">Con buy-in 0 = freeroll</p>
+            </div>
+          </div>
           <div>
             <Label htmlFor="t-start" className="text-[10px] text-gray-500">
               Inicio programado (opcional) — a esta hora se rellena con bots y arranca solo

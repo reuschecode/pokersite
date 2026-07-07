@@ -11,12 +11,16 @@ const handsConfig = { hands: { label: 'Manos', color: '#eab308' } };
 export function StatsPage() {
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
+  const [achievements, setAchievements] = useState([]);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     api.get('/players/me/stats')
       .then(({ data }) => setStats(data))
       .catch(() => setError('No se pudieron cargar tus estadísticas'));
+    api.get('/players/me/achievements')
+      .then(({ data }) => setAchievements(data))
+      .catch(() => {});
   }, []);
 
   if (error) {
@@ -37,6 +41,9 @@ export function StatsPage() {
     { label: 'Winrate', value: `${stats.winRate}%` },
     { label: 'Ganancia neta', value: `${netPositive ? '+' : ''}${stats.net.toLocaleString()}`, color: netPositive ? 'text-green-400' : 'text-red-400' },
     { label: 'Mejor bote ganado', value: stats.bestWin.toLocaleString() },
+    { label: 'VPIP', value: `${stats.vpip ?? 0}%`, hint: '% de manos en que pusiste fichas voluntariamente preflop' },
+    { label: 'PFR', value: `${stats.pfr ?? 0}%`, hint: '% de manos en que subiste preflop' },
+    { label: 'Agresión (AF)', value: stats.af ?? 0, hint: 'subidas ÷ pagos — más alto = más agresivo' },
   ];
 
   return (
@@ -55,7 +62,7 @@ export function StatsPage() {
             {/* KPIs */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
               {KPIS.map(k => (
-                <Card key={k.label}>
+                <Card key={k.label} title={k.hint || ''}>
                   <CardHeader className="pb-0">
                     <CardDescription className="text-[10px] uppercase tracking-wider">{k.label}</CardDescription>
                   </CardHeader>
@@ -65,6 +72,32 @@ export function StatsPage() {
                 </Card>
               ))}
             </div>
+
+            {/* Logros e insignias */}
+            {achievements.length > 0 && (
+              <div className="mb-8">
+                <h2 className="font-bold mb-3">
+                  🎖️ Logros ({achievements.filter(a => a.logrado).length}/{achievements.length})
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                  {achievements.map(a => (
+                    <div
+                      key={a.id}
+                      title={a.desc}
+                      className={`rounded-xl border px-3 py-2.5 ${
+                        a.logrado
+                          ? 'bg-yellow-900/30 border-yellow-700/60'
+                          : 'bg-gray-900/60 border-gray-800 opacity-50 grayscale'
+                      }`}
+                    >
+                      <div className="text-2xl leading-none mb-1">{a.emoji}</div>
+                      <div className="text-xs font-bold truncate">{a.nombre}</div>
+                      <div className="text-[10px] text-gray-400 truncate">{a.logrado ? '✓ Logrado' : a.progreso || a.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Curva de ganancia acumulada */}
             <Card className="mb-5">

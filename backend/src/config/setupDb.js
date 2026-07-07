@@ -131,6 +131,27 @@ async function setupDb() {
       if (e.code !== 'ER_DUP_FIELDNAME') throw e;
     }
 
+    // Migration: snapshot del runtime del torneo (persistencia ante reinicios)
+    try {
+      await conn.query(`ALTER TABLE tournaments ADD COLUMN runtime_json LONGTEXT NULL`);
+    } catch (e) {
+      if (e.code !== 'ER_DUP_FIELDNAME') throw e;
+    }
+
+    // Migration: mesas privadas con código de invitación (home games)
+    try {
+      await conn.query(`ALTER TABLE tables_cash ADD COLUMN invite_code VARCHAR(12) NULL, ADD COLUMN owner_id CHAR(36) NULL, ADD INDEX idx_invite (invite_code)`);
+    } catch (e) {
+      if (e.code !== 'ER_DUP_FIELDNAME') throw e;
+    }
+
+    // Migration: recompensa por eliminación (torneos bounty/KO)
+    try {
+      await conn.query(`ALTER TABLE tournaments ADD COLUMN bounty DECIMAL(10,2) NOT NULL DEFAULT 0`);
+    } catch (e) {
+      if (e.code !== 'ER_DUP_FIELDNAME') throw e;
+    }
+
     // Bots: el nivel real y la personalidad viven aislados de players
     await conn.query(`CREATE TABLE IF NOT EXISTS bots (
       bot_id           CHAR(36)     NOT NULL,

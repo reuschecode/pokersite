@@ -7,6 +7,7 @@ const HandLogger = require('./handLogger');
 const { bestHand, compareHands } = require('./variants/holdem/handEvaluator');
 
 const ACTION_TIMEOUT_MS = 30_000;
+const TIME_BANK_SECONDS = 30; // banco de tiempo extra por jugador (una vez por mesa)
 const PHASES = ['pre_flop', 'flop', 'turn', 'river', 'showdown'];
 
 // io is injected at init time
@@ -150,6 +151,20 @@ function startHand(table) {
   const sbSeat = table.seats.find(s => s.position === sbPos);
   const bbSeat = table.seats.find(s => s.position === bbPos);
 
+  // Antes (torneos, niveles altos): dinero muerto al bote de cada jugador vivo.
+  // No cuenta como apuesta de calle (no entra a streetBets).
+  const ante = table.ante || 0;
+  if (ante > 0) {
+    for (const s of activeSeats) {
+      const a = Math.min(ante, s.stack);
+      if (a <= 0) continue;
+      s.stack -= a;
+      table.potManager.addBet(s.playerId, a, s.stack === 0);
+      if (s.stack === 0) s.status = 'all_in';
+      table.handLogger.log(s.playerId, 'post_ante', a, table.potManager.totalPot());
+    }
+  }
+
   // Post blinds
   const sbAmount = Math.min(table.smallBlind, sbSeat.stack);
   const bbAmount = Math.min(table.bigBlind, bbSeat.stack);
@@ -243,6 +258,34 @@ function scheduleAction(table) {
   });
 
   table.actionTimeout = setTimeout(() => {
+    // Banco de tiempo: 30s extra por jugador (una vez por sesión de mesa).
+    // Se consume entero al activarse; los bots nunca lo necesitan.
+    table.timeBanks = table.timeBanks || {};
+    const pid = seat.playerId;
+    const bank = table.timeBanks[pid] !== undefined ? table.timeBanks[pid] : TIME_BANK_SECONDS;
+    if (bank >= 3) {
+      table.timeBanks[pid] = 0;
+      table.actionDeadline = Date.now() + bank * 1000;
+      const toCallNow = Math.max(0, (table.currentBet || 0) - (table.streetBets[pid] || 0));
+      emitToTable(table.id, 'action_required', {
+        playerId: pid,
+        timeoutMs: bank * 1000,
+        deadline: table.actionDeadline,
+        toCall: toCallNow,
+        currentBet: table.currentBet || 0,
+        minRaiseTo: (table.currentBet || 0) + (table.lastRaiseSize || table.bigBlind),
+        timeBank: true,
+      });
+      emitToTable(table.id, 'chat_received', {
+        playerId: null, nickname: 'Dealer', type: 'dealer', at: new Date().toISOString(),
+        text: `⏳ ${seat.nickname} usa su banco de tiempo (+${bank}s)`,
+      });
+      table.actionTimeout = setTimeout(() => {
+        const owed = (table.currentBet || 0) - (table.streetBets[pid] || 0);
+        processAction(table, pid, owed === 0 ? { type: 'check' } : { type: 'fold' }, true);
+      }, bank * 1000);
+      return;
+    }
     const owed = (table.currentBet || 0) - (table.streetBets[seat.playerId] || 0);
     const autoAction = owed === 0 ? { type: 'check' } : { type: 'fold' };
     processAction(table, seat.playerId, autoAction, true);
@@ -570,9 +613,16 @@ function runShowdown(table, earlyEnd = false) {
         : `${s.nickname} se quedó sin fichas y deja la mesa`,
     });
   }
-  // Torneo: avisar al manager de las eliminaciones (para final_position) antes de liberar
+  // Torneo: avisar al manager de las eliminaciones (para final_position) antes de liberar.
+  // Se incluye al mayor ganador de la mano (el "cazador") para pagar bounties.
   if (busted.length && table.isTournament && table.onBust) {
-    table.onBust(busted.map(s => ({ playerId: s.playerId, nickname: s.nickname })));
+    const hunter = winners.length
+      ? [...winners].sort((a, b) => (b.amount || 0) - (a.amount || 0))[0]
+      : null;
+    table.onBust(
+      busted.map(s => ({ playerId: s.playerId, nickname: s.nickname })),
+      hunter ? { playerId: hunter.playerId, nickname: hunter.nickname } : null
+    );
   }
   if (busted.length) {
     const bustedIds = busted.map(s => s.playerId);

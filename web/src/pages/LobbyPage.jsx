@@ -5,6 +5,7 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { notify, canAskNotifications, askNotifications } from '../lib/notify';
 import { Avatar } from '../components/table/Avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -123,7 +124,15 @@ export function LobbyPage() {
   const [buyInModal, setBuyInModal] = useState(null);
   const [buyIn, setBuyIn] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [nowTick, setNowTick] = useState(Date.now()); // reloj para cuentas regresivas
+  const [joinCode, setJoinCode] = useState(''); // código de mesa privada
+  const [showNotifBtn, setShowNotifBtn] = useState(() => canAskNotifications());
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     if (!player) { setShowAuth(true); return; }
@@ -137,6 +146,7 @@ export function LobbyPage() {
     const onStart = ({ tableId }) => {
       if (!tableId) return;
       toast.info('🏆 ¡Tu torneo está comenzando! Entrando a la mesa...');
+      notify('🏆 ¡Tu torneo comienza!', 'Entrando a tu mesa...');
       navigate(`/table/${tableId}?buyIn=1500`);
     };
     s?.on?.('torneo_iniciado', onStart);
@@ -160,11 +170,49 @@ export function LobbyPage() {
 
   async function joinTournament(id) {
     try {
-      await api.post(`/tournaments/${id}/register`);
+      const { data } = await api.post(`/tournaments/${id}/register`);
+      if (data.tableId) {
+        // Inscripción tardía / re-entry: directo a la mesa
+        toast.success(data.reentry ? '🔄 ¡De vuelta al torneo!' : '🏆 ¡Dentro! Entrando a tu mesa...');
+        navigate(`/table/${data.tableId}?buyIn=1500`);
+        return;
+      }
       toast.success('¡Inscrito al torneo! Te avisaremos cuando arranque.');
       fetchTournaments();
     } catch (e) {
       toast.error(e.response?.data?.error || 'No se pudo inscribir');
+    }
+  }
+
+  // ── Home games: mesa privada con código ──
+  async function createPrivateTable() {
+    try {
+      const { data } = await api.post('/tables/private', {});
+      toast.success(`Mesa privada creada — código: ${data.inviteCode}`, { duration: 10000 });
+      navigate(`/table/${data.id}?buyIn=${data.buyInMin}`);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'No se pudo crear la mesa');
+    }
+  }
+
+  async function joinByCode() {
+    const code = joinCode.trim().toUpperCase();
+    if (!code) return;
+    try {
+      const { data } = await api.get(`/tables/by-code/${code}`);
+      navigate(`/table/${data.id}?buyIn=${data.buy_in_min}`);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Código no válido');
+    }
+  }
+
+  // Entrar/volver a mi mesa de un torneo en curso
+  async function enterTournament(id) {
+    try {
+      const { data } = await api.get(`/tournaments/${id}/my-table`);
+      navigate(`/table/${data.tableId}?buyIn=1500`);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'No se encontró tu mesa');
     }
   }
 
@@ -243,9 +291,41 @@ export function LobbyPage() {
             <h2 className="text-xl font-bold mb-4">🏆 Campeonatos</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {tournaments.map(t => {
-                const mine = t.registrations?.some?.(r => r.player_id === player?.id);
+                const mine = !!t.am_registered;
+                const eliminated = mine && t.my_final_position !== null;
+                const playing = mine && t.my_final_position === null;
                 const full = t.registered >= t.max_players;
                 const running = t.status === 'running';
+                // Cuenta regresiva del inicio programado
+                let countdown = null;
+                if (!running && t.starts_at) {
+                  const diff = new Date(t.starts_at).getTime() - nowTick;
+                  if (diff > 0) {
+                    const h = Math.floor(diff / 3600000), m = Math.floor((diff % 3600000) / 60000), s = Math.floor((diff % 60000) / 1000);
+                    countdown = h > 0 ? `${h}h ${m}m` : `${m}m ${String(s).padStart(2, '0')}s`;
+                  } else countdown = 'por comenzar...';
+                }
+                // Botón según mi estado
+                let btn;
+                if (running && playing) {
+                  btn = <button onClick={() => enterTournament(t.id)} className="w-full bg-green-700 hover:bg-green-600 text-white font-bold py-2 rounded-xl transition-colors">▶ Entrar al torneo</button>;
+                } else if (running && eliminated && t.late_reg_open) {
+                  btn = <button onClick={() => joinTournament(t.id)} className="w-full bg-purple-700 hover:bg-purple-600 text-white font-bold py-2 rounded-xl transition-colors">🔄 Re-entrar (${t.buy_in})</button>;
+                } else if (running && !mine && t.late_reg_open) {
+                  btn = <button onClick={() => joinTournament(t.id)} className="w-full bg-yellow-700 hover:bg-yellow-600 text-white font-bold py-2 rounded-xl transition-colors">🕐 Inscripción tardía (${t.buy_in})</button>;
+                } else if (running) {
+                  btn = <button disabled className="w-full bg-gray-700 opacity-40 text-white font-bold py-2 rounded-xl">{eliminated ? `Eliminado (${t.my_final_position}º)` : 'En curso'}</button>;
+                } else {
+                  btn = (
+                    <button
+                      onClick={() => joinTournament(t.id)}
+                      disabled={full || mine}
+                      className="w-full bg-yellow-700 hover:bg-yellow-600 disabled:opacity-40 text-white font-bold py-2 rounded-xl transition-colors"
+                    >
+                      {mine ? 'Inscrito ✓' : full ? 'Completo' : 'Inscribirme'}
+                    </button>
+                  );
+                }
                 return (
                   <div key={t.id} className="bg-gray-800 rounded-2xl p-5 border border-yellow-800/40 card-hover">
                     <div className="flex justify-between items-start mb-2">
@@ -254,24 +334,69 @@ export function LobbyPage() {
                         {running ? 'En curso' : `${t.registered}/${t.max_players}`}
                       </span>
                     </div>
-                    <div className="text-sm text-gray-300 mb-4">
+                    <div className="text-sm text-gray-300 mb-1">
                       Buy-in: <span className="text-white font-mono">${t.buy_in}</span>
                       <span className="mx-2">·</span>
                       Bote: <span className="text-yellow-400 font-mono">${t.prize_pool}</span>
                     </div>
-                    <button
-                      onClick={() => joinTournament(t.id)}
-                      disabled={running || full || mine}
-                      className="w-full bg-yellow-700 hover:bg-yellow-600 disabled:opacity-40 text-white font-bold py-2 rounded-xl transition-colors"
-                    >
-                      {running ? 'Ya empezó' : mine ? 'Inscrito ✓' : full ? 'Completo' : 'Inscribirme'}
-                    </button>
+                    {countdown && (
+                      <div className="text-sm text-yellow-300 font-semibold mb-3">🕐 Empieza en {countdown}</div>
+                    )}
+                    {running && t.late_reg_open && !playing && (
+                      <div className="text-xs text-sky-300 mb-3">Inscripción tardía abierta</div>
+                    )}
+                    {!countdown && !(running && t.late_reg_open && !playing) && <div className="mb-3" />}
+                    {btn}
                   </div>
                 );
               })}
             </div>
           </div>
         )}
+
+        {/* Aviso de notificaciones (una sola vez) */}
+        {showNotifBtn && (
+          <div className="mb-6 flex items-center justify-between bg-sky-950/50 border border-sky-800/50 rounded-xl px-4 py-3">
+            <span className="text-sm text-sky-200">🔔 Activa los avisos para saber cuando es tu turno o empieza tu torneo (aunque estés en otra pestaña)</span>
+            <button
+              onClick={async () => { await askNotifications(); setShowNotifBtn(false); }}
+              className="shrink-0 ml-3 bg-sky-700 hover:bg-sky-600 text-white text-sm font-bold px-4 py-1.5 rounded-lg"
+            >
+              Activar
+            </button>
+          </div>
+        )}
+
+        {/* Home games: mesas privadas con código */}
+        <div className="mb-8 bg-gray-800/70 border border-purple-800/40 rounded-2xl p-5">
+          <h2 className="text-lg font-bold mb-1">🏠 Mesa privada (Home Game)</h2>
+          <p className="text-sm text-gray-400 mb-4">Crea tu mesa y comparte el código con tus amigos — no aparece en el lobby.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={createPrivateTable}
+              className="bg-purple-700 hover:bg-purple-600 text-white font-bold px-5 py-2 rounded-xl transition-colors"
+            >
+              + Crear mi mesa privada
+            </button>
+            <span className="text-gray-500 text-sm">o</span>
+            <div className="flex gap-2">
+              <input
+                value={joinCode}
+                onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === 'Enter' && joinByCode()}
+                placeholder="CÓDIGO"
+                maxLength={8}
+                className="w-32 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-center font-mono tracking-widest uppercase"
+              />
+              <button
+                onClick={joinByCode}
+                className="bg-gray-700 hover:bg-gray-600 text-white font-bold px-4 py-2 rounded-xl transition-colors"
+              >
+                Unirme
+              </button>
+            </div>
+          </div>
+        </div>
 
         <h2 className="text-xl font-bold mb-6">Mesas disponibles</h2>
         {tables.length === 0 ? (
