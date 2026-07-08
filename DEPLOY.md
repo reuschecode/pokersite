@@ -34,6 +34,8 @@ DB_USER=${{MySQL.MYSQLUSER}}
 DB_PASSWORD=${{MySQL.MYSQLPASSWORD}}
 DB_NAME=${{MySQL.MYSQLDATABASE}}
 JWT_SECRET=<genera-uno-nuevo-largo-y-aleatorio>
+ADMIN_EMAIL=tu-correo@ejemplo.com
+ADMIN_PASSWORD=<una-contraseña-fuerte>
 ```
 
 - **JWT_SECRET**: genera uno nuevo (NO reutilices el local). Ej.:
@@ -43,24 +45,21 @@ JWT_SECRET=<genera-uno-nuevo-largo-y-aleatorio>
   Para probar el juego se pueden dejar sin poner (las recargas con tarjeta quedan
   deshabilitadas, pero el póker con fichas de práctica funciona).
 
-### 4. Primer arranque
-- Al desplegar, el backend **crea el esquema solo** (verás `[DB] Schema created/verified`).
-- **Sembrar los 100 bots** (una vez): en el servicio de la app, abre una terminal /
-  one-off command en Railway y corre:
-  ```
-  node backend/seedBots.js
-  ```
-  (o con la CLI: `railway run node backend/seedBots.js`)
+### 4. Primer arranque — TODO automático ✅
+Al desplegar, el backend **se auto-provisiona** (idempotente, solo si falta):
+- Crea el **esquema** de la base (`[DB] Schema created/verified`).
+- Crea el **admin** con `ADMIN_EMAIL` / `ADMIN_PASSWORD` (si no defines
+  `ADMIN_PASSWORD`, usa `admin123` y avisa por consola — **defínela**).
+- Siembra los **100 bots**.
+- Crea una **Mesa Principal**.
 
-### 5. Crear el administrador
-- Regístrate normalmente en la web desplegada (crea tu cuenta).
-- Marca esa cuenta como admin en la base (Railway → MySQL → Query):
-  ```sql
-  UPDATE players SET is_admin = 1 WHERE email = 'TU_CORREO';
-  ```
-- Usa una **contraseña fuerte** (no `123456`).
+No hay que correr scripts a mano. Verás en los logs: `[bootstrap] Admin listo…`,
+`Sembrando 100 bots…`, `Mesa Principal creada.`
 
-### 6. Listo
+> Si cambias `ADMIN_PASSWORD` después, se **actualiza** la contraseña del admin
+> en el siguiente reinicio (el bootstrap la resetea al valor del entorno).
+
+### 5. Listo
 Abre la URL pública que da Railway. El frontend, la API y los sockets viven en el
 mismo dominio, así que todo conecta sin configuración extra.
 

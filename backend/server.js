@@ -63,7 +63,9 @@ process.on('unhandledRejection', (err) => {
 });
 
 setupDb()
-  .then(() => {
+  .then(async () => {
+    // Auto-provisionamiento (admin/bots/mesa) idempotente para bases nuevas
+    try { await require('./src/config/bootstrap')(); } catch (e) { console.error('[bootstrap]', e.message); }
     server.listen(PORT, () => console.log(`[Server] Listening on port ${PORT}`));
     // Reprogramar torneos con inicio por fecha/hora tras un reinicio
     try { require('./src/controllers/tournamentsController').initScheduler(); } catch (e) { console.error('[Torneos] scheduler:', e.message); }

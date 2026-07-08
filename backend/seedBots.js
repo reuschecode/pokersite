@@ -60,7 +60,7 @@ function makeNicknames(n) {
   return [...set];
 }
 
-async function main() {
+async function seedBots() {
   const LEVELS = [5, 6, 7, 8, 9, 10];
   const TOTAL = 100;
   const nicks = makeNicknames(TOTAL);
@@ -104,7 +104,14 @@ async function main() {
   console.log('[seedBots] Por nivel:', JSON.stringify(perLevel));
   const [[{ n }]] = await pool.query('SELECT COUNT(*) n FROM bots');
   console.log(`[seedBots] Total en tabla bots: ${n}`);
-  process.exit(0);
+  return created;
 }
 
-main().catch(e => { console.error('[seedBots] ERROR', e); process.exit(1); });
+module.exports = { seedBots };
+
+// Ejecución directa: node seedBots.js
+if (require.main === module) {
+  seedBots()
+    .then(() => process.exit(0))
+    .catch(e => { console.error('[seedBots] ERROR', e); process.exit(1); });
+}
